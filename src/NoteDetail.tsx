@@ -8,13 +8,20 @@ import "./editor.css";
 import { Link, useParams } from "react-router-dom";
 
 import { Badge, Collapse } from "react-bootstrap";
+import { DragDropContext, Droppable, Draggable } from "react-beautiful-dnd";
+
 import { useAddBucket, useSelectors } from "./DataContext";
 
-import { ReadonlyNode } from "./ReadonlyNode";
+import { EditableNode, ReadonlyNode } from "./ReadonlyNode";
 
 import { NoteDetailSuggestions } from "./NoteDetailSuggestion";
 
-import { connectRelevantNodes, newNode, createContext } from "./connections";
+import {
+  connectRelevantNodes,
+  newNode,
+  createContext,
+  moveRelations
+} from "./connections";
 
 import { extractPlainText } from "./Searchbox";
 
@@ -42,13 +49,15 @@ function SubNode({
   nodeID: string;
   parentNode?: KnowNode;
   allowAddTopicBelow?: boolean;
-  showChildren?: boolean;
+  showChildren: boolean;
   showLink?: boolean;
   borderBottom: boolean;
 }): JSX.Element {
   const [showEdit, setShowEdit] = useState<NodeType | undefined>();
   const [comment, setComment] = useState<string>("");
   const [showMenu, setShowMenu] = useState<boolean>(false);
+  const [editing, setEditing] = useState<boolean>(false);
+  const [editingText, setEditingText] = useState<string>("");
   const addBucket = useAddBucket();
   const { getObjects, getSubjects, getNode } = useSelectors();
   const quillRef = useRef<ReactQuill>();
@@ -106,15 +115,14 @@ function SubNode({
           // TODO: think if that's suitable for non source node types
           subject.relationsToObjects.filter(
             relToObj => relToObj.b === parentNode.id
-          ).length +
+          ).size +
             subject.relationsToSubjects.filter(
               relToSubj => relToSubj.a === parentNode.id
-            ).length ===
+            ).size ===
             0
         )
     );
-
-  const expandSubNodes = showChildren && showMenu;
+  const expandSubNodes = showChildren && (showMenu || editing);
   const parentNodes = [
     ...getObjects(node, undefined, ["RELEVANT"]),
     ...getSubjects(node, ["VIEW"], ["CONTAINS"])
@@ -131,12 +139,13 @@ function SubNode({
 
   /* eslint-disable jsx-a11y/click-events-have-key-events */
   /* eslint-disable jsx-a11y/no-static-element-interactions */
+  /* eslint-disable react/no-array-index-key */
   return (
     <>
       <div className={borderBottom ? "border-bottom" : ""}>
         <div className="pt-3">
-          {parentNodes.map(p => (
-            <Link to={`/notes/${p.id}`} key={p.id}>
+          {parentNodes.map((p, i) => (
+            <Link to={`/notes/${p.id}`} key={`${p.id}-${i}`}>
               <Badge
                 variant={
                   p.nodeType === "TOPIC" ? "outline-info" : "outline-dark"
@@ -149,7 +158,7 @@ function SubNode({
             </Link>
           ))}
         </div>
-        <Collapse in={showMenu} mountOnEnter>
+        <Collapse in={showMenu || editing} mountOnEnter>
           <div>
             <NoteDetailSuggestions
               parentNode={parentNode}
@@ -163,37 +172,96 @@ function SubNode({
         </Collapse>
         <div key={node.id}>
           <div
-            onClick={() => setShowMenu(!showMenu)}
+            onClick={() => {
+              if (!editing) {
+                setShowMenu(!showMenu);
+              }
+            }}
             style={{ cursor: "pointer" }}
           >
-            <ReadonlyNode node={node} />
+            {!editing && <ReadonlyNode node={node} />}
+            {editing && (
+              <EditableNode
+                node={{
+                  ...node,
+                  text: editingText
+                }}
+                onChange={(text: string) => setEditingText(text)}
+              />
+            )}
           </div>
         </div>
         <Collapse in={showMenu} mountOnEnter>
           <div>
-            <div className="justify-content-center nav">
-              <button
-                className={`header-icon btn btn-empty font-size-toolbar text-semi-muted ${
-                  showEdit === "NOTE" ? "text-primary" : ""
-                }`}
-                type="button"
-                onClick={() =>
-                  setShowEdit(showEdit === "NOTE" ? undefined : "NOTE")
-                }
-              >
-                <i className="simple-icon-speech d-block" />
-              </button>
-              {showLink && (
-                <Link to={`/notes/${node.id}`}>
+            {!editing && (
+              <div className="justify-content-center nav">
+                <button
+                  className={`header-icon btn btn-empty font-size-toolbar text-semi-muted ${
+                    showEdit === "NOTE" ? "text-primary" : ""
+                  }`}
+                  type="button"
+                  onClick={() =>
+                    setShowEdit(showEdit === "NOTE" ? undefined : "NOTE")
+                  }
+                >
+                  <i className="simple-icon-speech d-block" />
+                </button>
+                <button
+                  className={`header-icon btn btn-empty font-size-toolbar text-semi-muted ${
+                    editing ? "text-primary" : ""
+                  }`}
+                  type="button"
+                  onClick={() => {
+                    setEditing(!editing);
+                  }}
+                >
+                  <i className="simple-icon-pencil d-block" />
+                </button>
+                {showLink && (
+                  <Link to={`/notes/${node.id}`}>
+                    <button
+                      type="button"
+                      className="header-icon btn btn-empty font-size-toolbar text-semi-muted"
+                    >
+                      <i className="simple-icon-link d-block" />
+                    </button>
+                  </Link>
+                )}
+              </div>
+            )}
+            {editing && (
+              <div className="justify-content-center nav">
+                <button
+                  className="header-icon btn btn-empty font-size-toolbar text-semi-muted"
+                  type="button"
+                  onClick={() => {
+                    setEditing(false);
+                  }}
+                >
+                  <i className="simple-icon-ban d-block" />
+                </button>
+                {!isEmpty(editingText) && (
                   <button
-                    type="button"
                     className="header-icon btn btn-empty font-size-toolbar text-semi-muted"
+                    type="button"
+                    onClick={() => {
+                      addBucket(
+                        Immutable.Map({
+                          [node.id]: {
+                            ...node,
+                            text: editingText
+                          }
+                        })
+                      );
+                      setEditing(false);
+                      setShowMenu(false);
+                    }}
                   >
-                    <i className="simple-icon-link d-block" />
+                    <i className="simple-icon-check d-block" />
                   </button>
-                </Link>
-              )}
-            </div>
+                )}
+              </div>
+            )}
           </div>
         </Collapse>
 
@@ -251,26 +319,131 @@ function SubNode({
   );
 }
 
+type SectionProps = {
+  title: string;
+  childNodes: Array<string>;
+  parentNode: KnowNode;
+};
+
+type SortableSectionProps = SectionProps & {
+  onSortEnd: (props: { oldIndex: number; newIndex: number }) => void;
+};
+
+/* eslint-disable react/jsx-props-no-spreading */
+/* eslint-disable @typescript-eslint/unbound-method */
+function SortableSection({
+  title,
+  onSortEnd,
+  childNodes,
+  parentNode
+}: SortableSectionProps): JSX.Element {
+  return (
+    <div className="row">
+      <div className="mb-4 col-lg-12 col-xl-6 offset-xl-3">
+        <Card>
+          <Card.Body>
+            <Card.Title>{title}</Card.Title>
+            <DragDropContext
+              onDragEnd={result => {
+                if (result.destination) {
+                  onSortEnd({
+                    oldIndex: result.source.index,
+                    newIndex: result.destination.index
+                  });
+                }
+              }}
+            >
+              <Droppable droppableId="droppable">
+                {provided => (
+                  <div {...provided.droppableProps} ref={provided.innerRef}>
+                    {childNodes.map((childNode, i) => (
+                      <Draggable
+                        key={childNode}
+                        draggableId={childNode}
+                        index={i}
+                      >
+                        {providedDraggable => (
+                          <div
+                            ref={providedDraggable.innerRef}
+                            {...providedDraggable.draggableProps}
+                            {...providedDraggable.dragHandleProps}
+                            style={providedDraggable.draggableProps.style}
+                          >
+                            <SubNode
+                              nodeID={childNode}
+                              parentNode={parentNode}
+                              allowAddTopicBelow={false}
+                              showChildren
+                              showLink
+                              borderBottom={i + 1 < childNodes.length}
+                            />
+                          </div>
+                        )}
+                      </Draggable>
+                    ))}
+                    {provided.placeholder}
+                  </div>
+                )}
+              </Droppable>
+            </DragDropContext>
+          </Card.Body>
+        </Card>
+      </div>
+    </div>
+  );
+}
+/* eslint-enable react/jsx-props-no-spreading */
+
+function Section({ title, childNodes, parentNode }: SectionProps): JSX.Element {
+  return (
+    <div className="row">
+      <div className="mb-4 col-lg-12 col-xl-6 offset-xl-3">
+        <Card>
+          <Card.Body>
+            <Card.Title>{title}</Card.Title>
+            {childNodes.map((childNode, i) => (
+              <SubNode
+                key={childNode}
+                nodeID={childNode}
+                parentNode={parentNode}
+                borderBottom={i + 1 < childNodes.length}
+                showChildren
+              />
+            ))}
+          </Card.Body>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
 function NoteDetail(): JSX.Element {
   const { id } = useParams<{ id: string }>();
   const { getNode, getSubjects, getObjects } = useSelectors();
+  const addBucket = useAddBucket();
   const node = getNode(id);
-  const children = Array.from(
+  const relevantSubjects = Array.from(
     new Set(
-      [
-        // For what is this Source Relevant?
-        ...(["TITLE", "QUOTE", "URL"].includes(node.nodeType)
-          ? // "NOTE" is legacy
-            getObjects(node, ["TOPIC", "NOTE"], ["RELEVANT"])
-          : []),
-        // Relevant for Node
-        ...getSubjects(
-          node,
-          ["TOPIC", "NOTE", "TITLE", "QUOTE"],
-          ["RELEVANT", "CONTAINS"]
-        ),
-        ...getObjects(node, ["QUOTE", "TITLE"], ["CONTAINS"])
-      ].map(child => child.id)
+      getSubjects(
+        node,
+        ["TOPIC", "NOTE", "TITLE", "QUOTE"],
+        ["RELEVANT", "CONTAINS"]
+      ).map(child => child.id)
+    )
+  );
+
+  const relevantObjects = Array.from(
+    new Set(
+      (["TITLE", "QUOTE", "URL"].includes(node.nodeType)
+        ? // "NOTE" is legacy
+          getObjects(node, ["TOPIC", "NOTE"], ["RELEVANT"])
+        : []
+      ).map(child => child.id)
+    )
+  );
+  const containsObjects = Array.from(
+    new Set(
+      getObjects(node, ["QUOTE", "TITLE"], ["CONTAINS"]).map(child => child.id)
     )
   );
 
@@ -291,26 +464,47 @@ function NoteDetail(): JSX.Element {
           </Card>
         </div>
       </div>
-      {children.length > 0 && (
-        <div className="row">
-          <div className="mb-4 col-lg-12 col-xl-6 offset-xl-3">
-            <Card>
-              <Card.Body>
-                {children.map((childNode, i) => (
-                  <SubNode
-                    nodeID={childNode}
-                    parentNode={node}
-                    key={childNode}
-                    allowAddTopicBelow={false}
-                    showChildren
-                    showLink
-                    borderBottom={i + 1 < children.length}
-                  />
-                ))}
-              </Card.Body>
-            </Card>
-          </div>
-        </div>
+      {relevantSubjects.length > 0 && (
+        <SortableSection
+          title="Relevant Subjects"
+          childNodes={relevantSubjects}
+          parentNode={node}
+          onSortEnd={({
+            oldIndex,
+            newIndex
+          }: {
+            oldIndex: number;
+            newIndex: number;
+          }) => {
+            addBucket(
+              Immutable.Map({
+                [node.id]: {
+                  ...node,
+                  relationsToSubjects: moveRelations(
+                    relevantSubjects,
+                    node.relationsToSubjects,
+                    oldIndex,
+                    newIndex
+                  )
+                }
+              })
+            );
+          }}
+        />
+      )}
+      {relevantObjects.length > 0 && (
+        <Section
+          title="Source is relevant for"
+          childNodes={relevantObjects}
+          parentNode={node}
+        />
+      )}
+      {containsObjects.length > 0 && (
+        <Section
+          title="Quotes"
+          childNodes={containsObjects}
+          parentNode={node}
+        />
       )}
     </>
   );

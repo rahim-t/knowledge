@@ -1,35 +1,13 @@
-import React from "react";
+import { fireEvent } from "@testing-library/react";
 import Immutable from "immutable";
-import { Route, MemoryRouter } from "react-router-dom";
-
-import { render, RenderResult } from "@testing-library/react";
 import { newNode, createContext } from "./connections";
 
-import { NoteDetail } from "./NoteDetail";
-
-import { RelationContext } from "./DataContext";
-
-function isInHeader(el: HTMLElement): boolean {
-  return el.closest(".header") !== null;
-}
-
-function getInHeader(result: RenderResult, text: string): HTMLElement {
-  const el = result.getByText(text);
-  expect(isInHeader(el)).toBeTruthy();
-  return el;
-}
-
-function getInBody(result: RenderResult, text: string): HTMLElement {
-  const el = result.getByText(text);
-  expect(isInHeader(el)).toBeFalsy();
-  return el;
-}
-
-function getBadge(result: RenderResult, text: string): HTMLElement {
-  const el = result.getByText(text);
-  expect(el.classList.contains("badge-pill")).toBeTruthy();
-  return el;
-}
+import {
+  getInHeader,
+  getInBody,
+  getBadge,
+  renderNoteDetail
+} from "./utils.test";
 
 test("Display what's relevant for a Topic", () => {
   const flyingCars = newNode("Flying Cars", "TOPIC");
@@ -52,24 +30,32 @@ test("Display what's relevant for a Topic", () => {
     .connectRelevant(quote.id, flyingCars.id)
     .connectContains(readingList.id, flyingCars.id);
 
-  const renderResult = render(
-    <MemoryRouter initialEntries={[`/notes/${flyingCars.id}/`]}>
-      <RelationContext.Provider
-        value={{
-          addBucket: jest.fn(),
-          nodes: context.nodes
-        }}
-      >
-        <Route path="/notes/:id">
-          <NoteDetail />
-        </Route>
-      </RelationContext.Provider>
-    </MemoryRouter>
-  );
+  const renderResult = renderNoteDetail({
+    nodes: context.nodes,
+    id: flyingCars.id
+  });
   getInHeader(renderResult, "Flying Cars");
   getInBody(renderResult, "Checkout Aerocars near you");
   getInBody(renderResult, "Aerocar");
   getInBody(renderResult, "Where is my flying car?");
   getInHeader(renderResult, "Reading List");
   getBadge(renderResult, "Reading List");
+});
+
+test("Display Notes relevant for Quote", () => {
+  const whereisMyFlyingCar = newNode("Where is my flying car?", "TITLE");
+  const quote = newNode("The problematic part of flying is landing", "QUOTE");
+  const note = newNode("Is landing that difficult?", "NOTE");
+  const context = createContext(Immutable.Map())
+    .set(whereisMyFlyingCar)
+    .set(note)
+    .set(quote)
+    .connectContains(whereisMyFlyingCar.id, quote.id)
+    .connectRelevant(note.id, quote.id);
+  const renderResult = renderNoteDetail({
+    nodes: context.nodes,
+    id: whereisMyFlyingCar.id
+  });
+  fireEvent.click(getInBody(renderResult, quote.text));
+  getInBody(renderResult, note.text);
 });
